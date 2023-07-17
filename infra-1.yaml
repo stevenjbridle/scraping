@@ -1,0 +1,144 @@
+Parameters:
+  CloudWatchTriggerExpression:
+    Type: String
+    Description: CloudWatch Trigger for lambda
+  DeployBucket:
+    Type: String
+    Description: Bucket to store lambda code
+  FileBucket:
+    Type: String
+    Description: Bucket to store scraped files
+
+
+Resources:
+  WebScraperLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: WebScraper
+      Runtime: python3.10
+      Handler: handler.lambda_handler
+      Code:
+        S3Bucket: !Ref DeployBucket
+        S3Key: lambda-code.zip
+      Role: !GetAtt WebScraperLambdaRole.Arn
+      Timeout: 900
+      Environment:
+        Variables:
+          FILE_BUCKET: !Ref FileBucket
+
+  WebScraperLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: WebScraperLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt DynamoDBTableFamCA.Arn
+                  - !GetAtt DynamoDBTableFedCFamC2F.Arn
+              - Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:ListBucket"
+                  - "s3:PutObject"
+                Resource:
+                  - !Sub arn:aws:s3:::${FileBucket}
+                  - !Sub arn:aws:s3:::${FileBucket}/*
+
+
+  DynamoDBTableFamCA:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: LoadedFamCAFiles
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  DynamoDBTableFedCFamC2F:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: LoadedFedCFamC2FFiles
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  WebScraperModernSlaveryScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: !Ref CloudWatchTriggerExpression
+      Targets:
+        - Arn: !GetAtt WebScraperLambdaFunction.Arn
+          Id: WebScraperLambdaFunctionTarget
+          Input: '{"FileType": "ModernSlavery"}'
+
+  WebScraperModernSlaveryLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebScraperLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt WebScraperModernSlaveryScheduledRule.Arn
+
+  WebScraperFamCAScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: !Ref CloudWatchTriggerExpression
+      Targets:
+        - Arn: !GetAtt WebScraperLambdaFunction.Arn
+          Id: WebScraperLambdaFunctionTarget
+          Input: '{"FileType": "FamCA"}'
+
+  WebScraperFamCALambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebScraperLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt WebScraperFamCAScheduledRule.Arn
+
+  WebScraperFedCFamC2FScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: !Ref CloudWatchTriggerExpression
+      Targets:
+        - Arn: !GetAtt WebScraperLambdaFunction.Arn
+          Id: WebScraperLambdaFunctionTarget
+          Input: '{"FileType": "FedCFamC2F"}'
+
+  WebScraperFedCFamC2FLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebScraperLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt WebScraperFedCFamC2FScheduledRule.Arn
